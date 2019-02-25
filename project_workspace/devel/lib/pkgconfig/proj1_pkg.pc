@@ -1,0 +1,8 @@
+prefix=/home/student/RobotsProject1/project_workspace/devel
+
+Name: proj1_pkg
+Description: Description of proj1_pkg
+Version: 0.0.1
+Cflags: 
+Libs: -L/home/student/RobotsProject1/project_workspace/devel/lib 
+Requires: 

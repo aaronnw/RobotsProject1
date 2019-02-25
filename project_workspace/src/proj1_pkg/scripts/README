@@ -1,0 +1,6 @@
+Add python scripts in this directory for the robot to run. 
+
+Run them with rosrun proj1_pkg filename.py
+
+If it complains about executability do chmod +x
+
