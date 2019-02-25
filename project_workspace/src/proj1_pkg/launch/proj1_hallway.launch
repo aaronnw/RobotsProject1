@@ -1,0 +1,18 @@
+<!-- Created via tutorial at http://gazebosim.org/tutorials?tut=ros_roslaunch#FindingWorldFilesOnYourComputer-->
+<launch>
+  <arg name="x_pos" default="0.0"/>
+  <arg name="y_pos" default="0.0"/>
+  <arg name="z_pos" default="0.0"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find proj1_pkg)/worlds/hallway.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <node name="spawn_turtlebot_model2" pkg="gazebo_ros" type="spawn_model" args="-x 0 -y 0 -z 0 -model turtlebot2" respawn="true" output="screen"/>
+
+</launch>

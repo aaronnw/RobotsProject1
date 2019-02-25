@@ -1,0 +1,8 @@
+<!-- Created via tutorial at http://gazebosim.org/tutorials?tut=ros_roslaunch#FindingWorldFilesOnYourComputer-->
+<launch>
+  <!-- We resume the logic in empty_world.launch, changing only the name of the world to be launched-->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find proj1_pkg)/worlds/room.world"/>
+    <!-- more default parameters can be changed here -->
+  </include>
+</launch>

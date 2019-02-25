@@ -1,0 +1,12 @@
+project_workspace created as a catkin workspace by the instructions here: http://wiki.ros.org/catkin/Tutorials/create_a_workspace
+
+project setup based on http://gazebosim.org/tutorials?tut=ros_roslaunch#FindingWorldFilesOnYourComputer
+
+
+To run the launch files:
+
+Run catkin_make
+
+roslaunch proj1_pkg proj1_hallway.launch
+OR 
+roslaunch proj1_pkg proj1_room.launch
