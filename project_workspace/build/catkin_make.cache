@@ -1,2 +1,0 @@
-proj1_pkg
--DCATKIN_DEVEL_PREFIX=/home/student/RobotsProject1/project_workspace/devel -DCMAKE_INSTALL_PREFIX=/home/student/RobotsProject1/project_workspace/install -G Unix Makefiles
