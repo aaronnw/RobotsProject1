@@ -1,19 +1,23 @@
 import rospy
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import PointCloud2
+import sensor_msgs.point_cloud2 as pc2
+from kobuki_msgs.msg import BumperEvent
 import threading
 import time
 import random
 import Queue
 from math import radians
 import curses
+import numpy as np
 
 
-cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=10)
+cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
 turninglock = False
 asymmetricescapelock = False
 symmetricescapelock = False
+escapelock = False
 keyinputlock = False
-collisionlock = False
 threads = []
 shutdown_flag = False
 
@@ -22,14 +26,15 @@ def go_forward():
     
     ### Get current position
     distance = 0
-    max_straight_distance = 25
+    max_straight_distance = 18
     global turninglock
     global shutdown_flag
+    global keyinputlock
     while not shutdown_flag:
         if keyinputlock:
-            rospy.sleep(3)
-        if not turninglock and not asymmetricescapelock and not symmetricescapelock and not keyinputlock and not collisionlock:
-            print('moving forward | distance =', distance)
+            time.sleep(3)
+	    keyinputlock = False
+        elif not turninglock and not asymmetricescapelock and not symmetricescapelock and not keyinputlock:
             # publish the velocity
             move_cmd = Twist()
             move_cmd.linear.x = 0.2
@@ -39,27 +44,21 @@ def go_forward():
             r = rospy.Rate(10)
             r.sleep()
 
-            ####if we've gone a foot, then set some flag for turning to true
+            ####if we've gone approx a foot, then set some flag for turning to true
             distance += 1
             turninglock = distance >= max_straight_distance
-        else:
-            distance = 0
 
-def turn_random():
-    global turninglock
-    global shutdown_flag
-    while not shutdown_flag:
         # Turn randomly (uniformly sampled within +/- 15 degrees) after every 1ft of forward movement.
-        if not collisionlock and not keyinputlock and not symmetricescapelock and not asymmetricescapelock and turninglock:
-            print('starting random turning')
+        elif not keyinputlock and not symmetricescapelock and not asymmetricescapelock and turninglock:
+	    distance = 0
             turninglock = True
             turn_cmd = Twist()
             turn_cmd.linear.x = 0
             rng = random.randint(-30, 30)
             turn_cmd.angular.z = radians(rng)
             #do this a couple times then turn off the need to turn
-            for i in range(20):
-                if keyinputlock or collisionlock:
+            for i in range(15):
+                if keyinputlock:
                     break
                 cmd_vel.publish(turn_cmd)
                 r = rospy.Rate(10)
@@ -67,7 +66,34 @@ def turn_random():
 
             turninglock = False
     
-def escape_asymmetric():
+def escape(data):
+    global shutdown_flag
+    global keyinputlock
+    global turninglock
+    if not keyinputlock and not turninglock:
+        #types = [(f.name, np.float32) for f in data.fields]
+        #point_array = np.fromstring(data.data, types)
+        #points = np.reshape(point_array, (data.height, data.width))
+        points = pc2.read_points(data, skip_nans=True, field_names=('x','y','z'))
+        xavg = 0.0
+        yavg = 0.0
+        zavg = 0.0
+        pointcount = 0
+        for p in points:
+             pointcount += 1
+             xavg += p[0]
+             yavg += p[1]
+             zavg += p[2]
+        if pointcount != 0:
+            xavg /= pointcount
+            yavg /= pointcount        
+            zavg /= pointcount
+
+            print((xavg, yavg, zavg))
+            #so it looks like the threshold for turning should be zavg < ~1.2, but NEED TO TEST THIS IN THE ROOM
+            #as far as asymmetric escapes go
+
+'''def escape_asymmetric():
     # Avoid asymmetric obstacles within 1ft in front of the robot.
     global shutdown_flag
     while not shutdown_flag:
@@ -87,17 +113,18 @@ def escape_symmetric():
             turn_cmd.angular.z = radians(180+rng)
             #do this a couple times then turn off the need to turn
             for i in range(5):
-                if keyinputlock or collisionlock:
+                if keyinputlock:
                     break
                 cmd_vel.publish(turn_cmd)
                 r = rospy.Rate(10)
                 r.sleep()
             symmetricescapelock = False
-            
+            '''
 
 def get_input():
     # Accept keyboard movement commands from a human user.
     global shutdown_flag
+    global keyinputlock
     while not shutdown_flag:
         #move based on keyboard input
 
@@ -117,33 +144,25 @@ def get_input():
 	char = ''
         # get input
         char = screen.getch()
-	print('char is' + str(char))
 	starttime = 0
         if char == curses.KEY_RIGHT:
             keyinputlock = True
-            print('right\n')
-            turn_cmd.angular.z = radians(-15)
+            turn_cmd.angular.z = radians(-30)
 
         if char == curses.KEY_LEFT:
             keyinputlock = True
-            print('left\n')
-            turn_cmd.angular.z = radians(15)
+            turn_cmd.angular.z = radians(30)
 
         if char == curses.KEY_UP:
             keyinputlock = True
-            print('up\n')
-            turn_cmd.linear.x = 0.2
+            turn_cmd.linear.x = 0.5
 
         if char == curses.KEY_DOWN:
             keyinputlock = True
-            print('down\n')
-            turn_cmd.linear.x = -0.2
+            turn_cmd.linear.x = -0.5
 
         if keyinputlock:
             cmd_vel.publish(turn_cmd)
-            keyinputlock = False
-
-
 
     # shut down cleanly
     curses.nocbreak()
@@ -151,12 +170,12 @@ def get_input():
     curses.echo()
     curses.endwin()
 
-def collision():
-    # Halt if collision(s) detected by bumper(s).
-    global shutdown_flag
-    while not shutdown_flag:
-        if False: #there's a collision
-            shutdown()
+def collision(data):
+    global keyinputlock
+    # Halt if collision detected by bumper(s).
+    if data.state == BumperEvent.PRESSED:
+	keyinputlock = True
+	print('Collision detected - use keys to move away')
 
 def shutdown():
     # stop turtlebot
@@ -184,7 +203,10 @@ def main():
     rospy.loginfo("To stop TurtleBot CTRL + C")
 
     # Create a publisher which can "talk" to TurtleBot and tell it to move
-    cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=2)
+    cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
+
+    obstacle_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, escape)
+    collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
     # Function to call on ctrl + c
     rospy.on_shutdown(shutdown)
@@ -197,17 +219,13 @@ def main():
     move_cmd.linear.x = -0.2
     move_cmd.angular.z = 0
 
-    tasks = [
-             #collision,
-             get_input]
+    tasks = [#get_input,
              #escape_symmetric,
-             # escape_asymmetric,
-             #turn_random,
-             #go_forward]
+             #escape_asymmetric,
+             go_forward]
 
     for t in tasks:
         th = threading.Thread(target=t)
-        #th.daemon = True
         threads.append(th)
         th.start()
 
