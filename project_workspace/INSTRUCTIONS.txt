@@ -7,6 +7,16 @@ To run the launch files:
 
 Run catkin_make
 
+
 roslaunch proj1_pkg proj1_hallway.launch
 OR 
 roslaunch proj1_pkg proj1_room.launch
+
+THEN
+rosrun proj1_pkg control_robot.py
+
+
+If ros can't find things run "source devel/setup.sh"
+If this gives a path error, edit the path to the workspace in setup.sh
+
+
