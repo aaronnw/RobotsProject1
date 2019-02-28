@@ -2,7 +2,7 @@
 
 import rospy
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import PointCloud2
+from sensor_msgs.msg import Image
 import sensor_msgs.point_cloud2 as pc2
 from kobuki_msgs.msg import BumperEvent
 import threading
@@ -13,15 +13,33 @@ from math import radians
 import curses
 import numpy as np
 import os
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
 
 cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
 _turning_lock = False
-_asymmetric_escape_lock = False
-symmetric_escape_lock = False
 _escape_lock = False
+_escape_reset_lock = False
 _key_input_lock = False
 _threads = []
 _shutdown_flag = False
+_bridge = CvBridge()
+
+def turn(angle, duration):
+    """
+    Turn the robot at the given radian speed and for <duration> tenths of a second
+    """
+    turn_cmd = Twist()
+    turn_cmd.linear.x = 0
+    turn_cmd.angular.z = radians(angle)
+    # do this duration times
+    for i in range(duration):
+        # if a key is pressed while turning, stop turning
+        if _key_input_lock:
+            break
+        cmd_vel.publish(turn_cmd)
+        r = rospy.Rate(10)
+        r.sleep()
 
 
 def go_forward():
@@ -31,6 +49,8 @@ def go_forward():
     global _turning_lock
     global _shutdown_flag
     global _key_input_lock
+    global _escape_lock
+    global _escape_reset_lock
     distance = 0  # distance traveled since last random turn, or since last lock release
     max_straight_distance = 18  # maximum distance to travel before making a random turn
     key_input_lock_delay = 3  # number of seconds to pause after detecting a key press
@@ -42,9 +62,16 @@ def go_forward():
         if _key_input_lock:
             time.sleep(key_input_lock_delay)
             _key_input_lock = False
+	    distance = 0
+	
+	# if we are currently escaping, reset the turning distance
+	# additionally, set the lock that prevents multiple consecutive escape attempts
+	elif _escape_lock:
+	    distance = 0
+	    _escape_reset_lock = True
 
         # if none of the higher-level tasks are active, drive forward
-        elif not _turning_lock and not _asymmetric_escape_lock and not symmetric_escape_lock and not _key_input_lock:
+        elif not _turning_lock and not _escape_lock and not _key_input_lock:
             # publish the velocity
             move_cmd = Twist()
             move_cmd.linear.x = 0.2
@@ -53,6 +80,7 @@ def go_forward():
             # wait for 0.1 seconds (10 HZ) and publish again
             r = rospy.Rate(10)
             r.sleep()
+	    _escape_reset_lock = False # after going forward once, we can allow an escape attempt
 
             # track the distance traveled
             distance += 1
@@ -63,78 +91,58 @@ def go_forward():
         elif _turning_lock:
             distance = 0  # reset the distance counter
             _turning_lock = True
-            turn_cmd = Twist()
-            turn_cmd.linear.x = 0
-            rng = random.randint(-30, 30)
-            turn_cmd.angular.z = radians(rng)
-            # do this a couple times then turn off the need to turn
-            for i in range(15):
-                # if a key is pressed while turning, stop turning
-                if _key_input_lock:
-                    break
-                cmd_vel.publish(turn_cmd)
-                r = rospy.Rate(10)
-                r.sleep()
-
+            rng = random.randint(-30, 30) 
+            turn(rng, 15)
             _turning_lock = False
 
 
-# TODO: add comments when this is done
 def escape(data):
+    """
+    Callback function for image processing.
+    Escapes from obstacles if necessary.
+    """
     global _shutdown_flag
     global _key_input_lock
     global _turning_lock
-    if not _key_input_lock and not _turning_lock:
-        # types = [(f.name, np.float32) for f in data.fields]
-        # point_array = np.fromstring(data.data, types)
-        # points = np.reshape(point_array, (data.height, data.width))
-        points = pc2.read_points(data, skip_nans=True, field_names=('x', 'y', 'z'))
-        xavg = 0.0
-        yavg = 0.0
-        zavg = 0.0
-        pointcount = 0
-        for p in points:
-            pointcount += 1
-            xavg += p[0]
-            yavg += p[1]
-            zavg += p[2]
-        if pointcount != 0:
-            xavg /= pointcount
-            yavg /= pointcount
-            zavg /= pointcount
+    global _escape_lock
+    global _escape_reset_lock
+    global _bridge
+    # don't escape while doing anything else, including escaping
+    if not _key_input_lock and not _turning_lock and not _escape_lock and not _escape_reset_lock:
+	# get the image, convert it to an array of depth values        
+	cv_image = _bridge.imgmsg_to_cv2(data, "32FC1")
 
-            print((xavg, yavg, zavg))
-            # so it looks like the threshold for turning should be zavg < ~1.2, but NEED TO TEST THIS IN THE ROOM
-            # as far as asymmetric escapes go
+	# calculate the average depth at the midline of image
+	# two averages, one for left half, one for right half
+	# looking only at the midline works here due to all obstacles being large walls
+	left_avg = 0
+	right_avg = 0
+	for i in range(320):
+	    left_avg += cv_image[240][i]
+            right_avg += cv_image[240][320+i]
+        left_avg /= 320
+        right_avg /= 320
 
-
-'''def escape_asymmetric():
-    # Avoid asymmetric obstacles within 1ft in front of the robot.
-    global _shutdown_flag
-    while not _shutdown_flag:
-        #actually no idea how this one works
-        print('escape_asymmetric')
-        _asymmetric_escape_lock = False
-
-def escape_symmetric():
-    # Escape from (roughly) symmetric obstacles within 1ft in front of the robot.
-    global _shutdown_flag
-    while not _shutdown_flag:
-        if not _key_input_lock: #and there's an object  directly in front
-            symmetric_escape_lock = True
-            turn_cmd = Twist()
-            turn_cmd.linear.x = 0
-            rng = random.randint(-30, 30)
-            turn_cmd.angular.z = radians(180+rng)
-            #do this a couple times then turn off the need to turn
-            for i in range(5):
-                if _key_input_lock:
-                    break
-                cmd_vel.publish(turn_cmd)
-                r = rospy.Rate(10)
-                r.sleep()
-            symmetric_escape_lock = False
-            '''
+	# a second callback function may sneak in here before another one can lock it
+	#	so we have to check just in case
+	# if both averages are low enough, we need to 180
+	if not _escape_lock and left_avg < .9 and right_avg < .9:
+	    _escape_lock = True
+	    turn(30, 55)	 # turn around ~180 degrees
+	    time.sleep(1)	 # give it a little time to finish the turn
+	    _escape_lock = False
+	# if the left side is too close, turn right
+	elif not _escape_lock and left_avg < .8:
+            _escape_lock = True
+	    turn(-30, 25)	 # turn right ~90 degrees
+	    time.sleep(1)	 # give it a little time to finish the turn
+	    _escape_lock = False
+	# if the right side is too close, turn left
+	elif not _escape_lock and right_avg < .8:
+	    _escape_lock = True
+	    turn(30, 25)	 # turn left ~90 degrees
+	    time.sleep(1)	 # give it a little time to finish the turn
+	    _escape_lock = False
 
 
 def get_input():
@@ -165,6 +173,7 @@ def get_input():
         # get input
         char = screen.getch()
         starttime = 0
+	# if left turn left, if right turn right, if up go forward, if down go backward
         if char == curses.KEY_RIGHT:
             _key_input_lock = True
             turn_cmd.angular.z = radians(-30)
@@ -175,12 +184,12 @@ def get_input():
 
         if char == curses.KEY_UP:
             _key_input_lock = True
-            turn_cmd.linear.x = 0.5
+            turn_cmd.linear.x = 0.2
 
         if char == curses.KEY_DOWN:
             _key_input_lock = True
-            turn_cmd.linear.x = -0.5
-
+            turn_cmd.linear.x = -0.2
+	# if we have a velocity to publish, do it
         if _key_input_lock:
             cmd_vel.publish(turn_cmd)
 
@@ -191,10 +200,10 @@ def get_input():
     curses.endwin()
 
 
-# TODO: do something intelligent instead of just shutting down
 def collision(data):
     """
     Halt if collision detected by bumper(s).
+    Wait for user to use keys to move away from the obstacle
     """
     global _key_input_lock
     if data.state == BumperEvent.PRESSED:
@@ -234,7 +243,7 @@ def main():
     # Create a publisher which can "talk" to TurtleBot and tell it to move
     cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
 
-    obstacle_sub = rospy.Subscriber('/camera/depth/points', PointCloud2, escape)
+    obstacle_sub = rospy.Subscriber('/camera/depth/image_raw', Image, escape)
     collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
     # Function to call on ctrl + c
@@ -248,10 +257,7 @@ def main():
     move_cmd.linear.x = -0.2
     move_cmd.angular.z = 0
 
-    tasks = [  # get_input,
-        # escape_symmetric,
-        # escape_asymmetric,
-        go_forward]
+    tasks = [ get_input, go_forward]
 
     for t in tasks:
         th = threading.Thread(target=t)
