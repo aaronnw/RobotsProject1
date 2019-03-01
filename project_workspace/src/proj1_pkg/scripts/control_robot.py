@@ -89,6 +89,7 @@ def go_forward():
 
         # turn randomly (uniformly sampled within +/- 15 degrees) after every 1ft of forward movement.
         elif _turning_lock:
+	    print("\nTurning randomly after 1ft of forward movement")
             distance = 0  # reset the distance counter
             _turning_lock = True
             rng = random.randint(-30, 30) 
@@ -117,28 +118,36 @@ def escape(data):
 	# looking only at the midline works here due to all obstacles being large walls
 	left_avg = 0
 	right_avg = 0
-	for i in range(320):
-	    left_avg += cv_image[240][i]
-            right_avg += cv_image[240][320+i]
-        left_avg /= 320
-        right_avg /= 320
+	# Half of the point cloud width is 320
+	half_width = 320
+	# The midway height of the point cloud is 240
+	half_height = 240
+
+	for i in range(half_width):
+	    left_avg += cv_image[half_height][i]
+            right_avg += cv_image[half_height][half_width+i]
+        left_avg /= half_width
+        right_avg /= half_width
 
 	# a second callback function may sneak in here before another one can lock it
 	#	so we have to check just in case
 	# if both averages are low enough, we need to 180
 	if not _escape_lock and left_avg < .9 and right_avg < .9:
+            print("\nEscaping symmetrical obstacles")
 	    _escape_lock = True
 	    turn(30, 55)	 # turn around ~180 degrees
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 	# if the left side is too close, turn right
 	elif not _escape_lock and left_avg < .8:
+            print("\nAvoiding asymmetrical obstacle, turning right")
             _escape_lock = True
 	    turn(-30, 25)	 # turn right ~90 degrees
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 	# if the right side is too close, turn left
 	elif not _escape_lock and right_avg < .8:
+            print("\nAvoiding asymmetrical obstacle, turning left")
 	    _escape_lock = True
 	    turn(30, 25)	 # turn left ~90 degrees
 	    time.sleep(1)	 # give it a little time to finish the turn
@@ -174,21 +183,27 @@ def get_input():
         char = screen.getch()
         starttime = 0
 	# if left turn left, if right turn right, if up go forward, if down go backward
+	turn_amount = 30
+	move_amount = 0.2
         if char == curses.KEY_RIGHT:
+	    print("\nKey press RIGHT")
             _key_input_lock = True
-            turn_cmd.angular.z = radians(-30)
+            turn_cmd.angular.z = radians(-turn_amount)
 
         if char == curses.KEY_LEFT:
+	    print("\nKey press LEFT")
             _key_input_lock = True
-            turn_cmd.angular.z = radians(30)
+            turn_cmd.angular.z = radians(turn_amount)
 
         if char == curses.KEY_UP:
+	    print("\nKey press FORWARD")
             _key_input_lock = True
-            turn_cmd.linear.x = 0.2
+            turn_cmd.linear.x = move_amount
 
         if char == curses.KEY_DOWN:
+	    print("\nKey press BACKWARD")
             _key_input_lock = True
-            turn_cmd.linear.x = -0.2
+            turn_cmd.linear.x = -move_amount
 	# if we have a velocity to publish, do it
         if _key_input_lock:
             cmd_vel.publish(turn_cmd)
@@ -208,7 +223,7 @@ def collision(data):
     global _key_input_lock
     if data.state == BumperEvent.PRESSED:
         _key_input_lock = True
-        print('Collision detected - use keys to move away')
+        print('\nCollision detected - use the arrow keys to move away')
 
 
 def shutdown():
@@ -216,7 +231,7 @@ def shutdown():
     Stop all the processes and shutdown the turtlebot
     """
     global _shutdown_flag
-    rospy.loginfo("Stop TurtleBot")
+    rospy.loginfo("Stopping TurtleBot")
     # a default Twist has linear.x of 0 and angular.z of 0
     cmd_vel.publish(Twist())
     # ensure TurtleBot receives the stop command prior to shutting down
@@ -226,7 +241,7 @@ def shutdown():
     rospy.sleep(1)
     # join all _threads
     for t in _threads:
-        print('joining thread')
+        print('Joining thread')
         t.join()
     # save the map
     os.system("rosrun map_server map_saver -f proj1_map_generated")
@@ -238,7 +253,7 @@ def main():
     rospy.init_node('Project_1_Robot_Control', anonymous=False)
 
     # Tell user how to stop TurtleBot
-    rospy.loginfo("To stop TurtleBot CTRL + C")
+    rospy.loginfo("To stop TurtleBot press CTRL + C")
 
     # Create a publisher which can "talk" to TurtleBot and tell it to move
     cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
@@ -268,8 +283,7 @@ def main():
         # Do nothing, let the _threads execute
         pass
 
-    print('shutting down turtlebot')
-
+    print('Shutting down turtlebot')
 
 if __name__ == '__main__':
     main()
