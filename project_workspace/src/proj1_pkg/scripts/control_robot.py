@@ -132,24 +132,28 @@ def escape(data):
 	# a second callback function may sneak in here before another one can lock it
 	#	so we have to check just in case
 	# if both averages are low enough, we need to 180
+	# Incremental amount to turn when seeing an asymmetric object before re-checking
+	turn_time = 5
+	# Speed in rad/s for all turns
+	turn_speed = 30
 	if not _escape_lock and left_avg < .9 and right_avg < .9:
             print("\nEscaping symmetrical obstacles")
 	    _escape_lock = True
-	    turn(30, 55)	 # turn around ~180 degrees
+	    turn(turn_speed, 55)	 # turn around ~180 degrees
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 	# if the left side is too close, turn right
 	elif not _escape_lock and left_avg < .8:
             print("\nAvoiding asymmetrical obstacle, turning right")
             _escape_lock = True
-	    turn(-30, 25)	 # turn right ~90 degrees
+	    turn(-turn_speed, turn_time)	 # turn right a small amount while the obstacle is close
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 	# if the right side is too close, turn left
 	elif not _escape_lock and right_avg < .8:
             print("\nAvoiding asymmetrical obstacle, turning left")
 	    _escape_lock = True
-	    turn(30, 25)	 # turn left ~90 degrees
+	    turn(turn_speed, turn_time)	 # turn left a small amount while the obstacle is close
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 
@@ -183,17 +187,17 @@ def get_input():
         char = screen.getch()
         starttime = 0
 	# if left turn left, if right turn right, if up go forward, if down go backward
-	turn_amount = 30
+	turn_speed = 60
 	move_amount = 0.2
         if char == curses.KEY_RIGHT:
 	    print("\nKey press RIGHT")
             _key_input_lock = True
-            turn_cmd.angular.z = radians(-turn_amount)
+            turn_cmd.angular.z = radians(-turn_speed)
 
         if char == curses.KEY_LEFT:
 	    print("\nKey press LEFT")
             _key_input_lock = True
-            turn_cmd.angular.z = radians(turn_amount)
+            turn_cmd.angular.z = radians(turn_speed)
 
         if char == curses.KEY_UP:
 	    print("\nKey press FORWARD")
