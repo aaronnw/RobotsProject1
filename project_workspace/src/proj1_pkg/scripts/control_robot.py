@@ -29,6 +29,9 @@ def turn(angle, duration):
     """
     Turn the robot at the given radian speed and for <duration> tenths of a second
     """
+    cmd_vel.publish(Twist())
+    r = rospy.Rate(5)
+    r.sleep()
     turn_cmd = Twist()
     turn_cmd.linear.x = 0
     turn_cmd.angular.z = radians(angle)
@@ -38,9 +41,9 @@ def turn(angle, duration):
         if _key_input_lock:
             break
         cmd_vel.publish(turn_cmd)
-        r = rospy.Rate(10)
         r.sleep()
-
+    cmd_vel.publish(Twist())
+    r.sleep()
 
 def go_forward():
     """
@@ -74,11 +77,11 @@ def go_forward():
         elif not _turning_lock and not _escape_lock and not _key_input_lock:
             # publish the velocity
             move_cmd = Twist()
-            move_cmd.linear.x = 0.2
+            move_cmd.linear.x = 0.15
             move_cmd.angular.z = 0
             cmd_vel.publish(move_cmd)
-            # wait for 0.1 seconds (10 HZ) and publish again
-            r = rospy.Rate(10)
+            # wait for 0.2 seconds (5 HZ) and publish again
+            r = rospy.Rate(5)
             r.sleep()
 	    _escape_reset_lock = False # after going forward once, we can allow an escape attempt
 
@@ -92,7 +95,7 @@ def go_forward():
 	    print("\nTurning randomly after 1ft of forward movement")
             distance = 0  # reset the distance counter
             _turning_lock = True
-            rng = random.randint(-30, 30) 
+            rng = random.randint(-45, 45) 
             turn(rng, 15)
             _turning_lock = False
 
@@ -227,6 +230,9 @@ def collision(data):
     global _key_input_lock
     if data.state == BumperEvent.PRESSED:
         _key_input_lock = True
+	if _key_input_lock:
+	    cmd_vel.publish(Twist())
+            rospy.sleep(.2)
         print('\nCollision detected - use the arrow keys to move away')
 
 

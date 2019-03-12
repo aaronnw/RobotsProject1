@@ -1,0 +1,14 @@
+Here's how to get the robot up and running for project 2.
+
+0. Make sure the ROS_MASTER_URI and ROS_HOSTNAME are correct. See wiki.ros.org/turtlebot/Tutorials/indigo/Network%20Configuration
+
+1. ssh into the turtlebot's computer
+	> ssh student@[the computer's name] -Y
+
+2. on two different terminals ssh'd in, run the following:
+	> roslaunch turtlebot_bringup minimal.launch --screen
+this boots the robot's movement and base sensors
+	> roslaunch turtlebot_bringup 3dsensor.launch
+this boots the robot's camera sensors
+
+3. run python script of choice
