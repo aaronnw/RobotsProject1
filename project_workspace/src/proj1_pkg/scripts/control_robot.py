@@ -16,33 +16,36 @@ import os
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
 
-cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
+_cmd_vel = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=1)
 _turning_lock = False
 _escape_lock = False
 _escape_reset_lock = False
 _key_input_lock = False
 _threads = []
 _shutdown_flag = False
+_collision_lock = False
 _bridge = CvBridge()
+_hz = 5
 
 def turn(angle, duration):
     """
     Turn the robot at the given radian speed and for <duration> tenths of a second
     """
-    cmd_vel.publish(Twist())
-    r = rospy.Rate(5)
-    r.sleep()
+    global _hz
+    global _cmd_vel
+    global _key_input_lock
+    #_cmd_vel.publish(Twist())
+    r = rospy.Rate(_hz)
     turn_cmd = Twist()
     turn_cmd.linear.x = 0
     turn_cmd.angular.z = radians(angle)
     # do this duration times
     for i in range(duration):
-        # if a key is pressed while turning, stop turning
         if _key_input_lock:
-            break
-        cmd_vel.publish(turn_cmd)
+           break
+	_cmd_vel.publish(turn_cmd)
         r.sleep()
-    cmd_vel.publish(Twist())
+    _cmd_vel.publish(Twist())
     r.sleep()
 
 def go_forward():
@@ -54,6 +57,9 @@ def go_forward():
     global _key_input_lock
     global _escape_lock
     global _escape_reset_lock
+    global _collision_lock
+    global _hz
+    global _cmd_vel
     distance = 0  # distance traveled since last random turn, or since last lock release
     max_straight_distance = 18  # maximum distance to travel before making a random turn
     key_input_lock_delay = 3  # number of seconds to pause after detecting a key press
@@ -62,7 +68,7 @@ def go_forward():
     while not _shutdown_flag:
         # if a key has been pressed, don't immediately attempt to drive again
         # instead, give the user time to react to the key press and then press another key
-        if _key_input_lock:
+        if _key_input_lock and not _collision_lock:
             time.sleep(key_input_lock_delay)
             _key_input_lock = False
 	    distance = 0
@@ -79,9 +85,10 @@ def go_forward():
             move_cmd = Twist()
             move_cmd.linear.x = 0.15
             move_cmd.angular.z = 0
-            cmd_vel.publish(move_cmd)
-            # wait for 0.2 seconds (5 HZ) and publish again
-            r = rospy.Rate(5)
+	    print('moving???')
+            _cmd_vel.publish(move_cmd)
+            # wait for 0.5 seconds (2 HZ) and publish again
+            r = rospy.Rate(_hz)
             r.sleep()
 	    _escape_reset_lock = False # after going forward once, we can allow an escape attempt
 
@@ -95,8 +102,9 @@ def go_forward():
 	    print("\nTurning randomly after 1ft of forward movement")
             distance = 0  # reset the distance counter
             _turning_lock = True
-            rng = random.randint(-45, 45) 
-            turn(rng, 15)
+            direction = random.choice([-1, 1]) 
+            rng = random.randint(1, 12)
+	    turn(30*direction, rng)
             _turning_lock = False
 
 
@@ -136,24 +144,25 @@ def escape(data):
 	#	so we have to check just in case
 	# if both averages are low enough, we need to 180
 	# Incremental amount to turn when seeing an asymmetric object before re-checking
-	turn_time = 5
+	turn_time = 25
 	# Speed in rad/s for all turns
 	turn_speed = 30
-	if not _escape_lock and left_avg < .9 and right_avg < .9:
+	print((left_avg, right_avg))
+	if not _escape_lock and left_avg < 800 and right_avg < 800:
             print("\nEscaping symmetrical obstacles")
 	    _escape_lock = True
-	    turn(turn_speed, 55)	 # turn around ~180 degrees
+	    turn(turn_speed, 45)	 # turn around ~180 degrees
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 	# if the left side is too close, turn right
-	elif not _escape_lock and left_avg < .8:
+	elif not _escape_lock and left_avg < 700:
             print("\nAvoiding asymmetrical obstacle, turning right")
             _escape_lock = True
 	    turn(-turn_speed, turn_time)	 # turn right a small amount while the obstacle is close
 	    time.sleep(1)	 # give it a little time to finish the turn
 	    _escape_lock = False
 	# if the right side is too close, turn left
-	elif not _escape_lock and right_avg < .8:
+	elif not _escape_lock and right_avg < 700:
             print("\nAvoiding asymmetrical obstacle, turning left")
 	    _escape_lock = True
 	    turn(turn_speed, turn_time)	 # turn left a small amount while the obstacle is close
@@ -167,6 +176,8 @@ def get_input():
     """
     global _shutdown_flag
     global _key_input_lock
+    global _collision_lock
+    global _cmd_vel
 
     # keep the thread running until the program receives the shutdown signal
     while not _shutdown_flag:
@@ -213,7 +224,8 @@ def get_input():
             turn_cmd.linear.x = -move_amount
 	# if we have a velocity to publish, do it
         if _key_input_lock:
-            cmd_vel.publish(turn_cmd)
+	    _collision_lock = False
+            _cmd_vel.publish(turn_cmd)
 
     # shut down cleanly
     curses.nocbreak()
@@ -228,11 +240,13 @@ def collision(data):
     Wait for user to use keys to move away from the obstacle
     """
     global _key_input_lock
+    global _collision_lock
+    global _cmd_vel
     if data.state == BumperEvent.PRESSED:
         _key_input_lock = True
+	_collision_lock = True
 	if _key_input_lock:
-	    cmd_vel.publish(Twist())
-            rospy.sleep(.2)
+	    _cmd_vel.publish(Twist())
         print('\nCollision detected - use the arrow keys to move away')
 
 
@@ -241,9 +255,11 @@ def shutdown():
     Stop all the processes and shutdown the turtlebot
     """
     global _shutdown_flag
+    global _threads
+    global _cmd_vel
     rospy.loginfo("Stopping TurtleBot")
     # a default Twist has linear.x of 0 and angular.z of 0
-    cmd_vel.publish(Twist())
+    _cmd_vel.publish(Twist())
     # ensure TurtleBot receives the stop command prior to shutting down
     rospy.sleep(1)
     # join all _threads
@@ -254,11 +270,13 @@ def shutdown():
         print('Joining thread')
         t.join()
     # save the map
-    os.system("rosrun map_server map_saver -f proj1_map_generated")
+    #os.system("rosrun map_server map_saver -f proj1_map_generated")
     print("Saving map files to current directory")
 
 
 def main():
+    global _threads
+    global _cmd_vel
     # initialize
     rospy.init_node('Project_1_Robot_Control', anonymous=False)
 
@@ -266,23 +284,23 @@ def main():
     rospy.loginfo("To stop TurtleBot press CTRL + C")
 
     # Create a publisher which can "talk" to TurtleBot and tell it to move
-    cmd_vel = rospy.Publisher('cmd_vel_mux/input/navi', Twist, queue_size=1)
+    _cmd_vel = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=1)
 
-    obstacle_sub = rospy.Subscriber('/camera/depth/image_raw', Image, escape)
+    obstacle_sub = rospy.Subscriber('/camera/depth/image_raw', Image, escape, queue_size=1)
     collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
     # Function to call on ctrl + c
     rospy.on_shutdown(shutdown)
 
-    # 10 HZ comms
-    r = rospy.Rate(10);
+    # xxxxx HZ comms
+    r = rospy.Rate(_hz);
 
     # Prep the move forward command
-    move_cmd = Twist()
-    move_cmd.linear.x = -0.2
-    move_cmd.angular.z = 0
+    #move_cmd = Twist()
+    #move_cmd.linear.x = -0.2
+    #move_cmd.angular.z = 0
 
-    tasks = [ get_input, go_forward]
+    tasks = [ go_forward, get_input ]
 
     for t in tasks:
         th = threading.Thread(target=t)
