@@ -86,7 +86,7 @@ def go_forward():
 			move_cmd = Twist()
 			move_cmd.linear.x = 0.15
 			move_cmd.angular.z = 0
-			print('moving???')
+			#print('moving???')
 			_cmd_vel.publish(move_cmd)
 			# wait for 0.5 seconds (2 HZ) and publish again
 			r = rospy.Rate(10)
@@ -147,25 +147,25 @@ def escape_calc(image):
 	"""   
 	global _left_avg
 	global _right_avg
-	
-	# cv_image = _bridge.imgmsg_to_cv2(image, "32FC1")
-	# # print(cv_image)
-	# # calculate the average depth at the midline of image
-	# # two averages, one for left half, one for right half
-	# # looking only at the midline works here due to all obstacles being large walls
-	# running_left_avg = 0
-	# running_right_avg = 0
-	# # Half of the point cloud width is 320
-	# half_width = 320
-	# # The midway height of the point cloud is 240
-	# half_height = 240
 
-	# for i in range(half_width):
-	# 	running_left_avg += cv_image[half_height][i]
-	# 	running_right_avg += cv_image[half_height][half_width+i]
-	# _left_avg = running_left_avg / half_width
-	# _right_avg = running_right_avg / half_width
-	# #print((_left_avg, _right_avg))
+	cv_image = _bridge.imgmsg_to_cv2(image, "32FC1")
+	# print(cv_image)
+	# calculate the average depth at the midline of image
+	# two averages, one for left half, one for right half
+	# looking only at the midline works here due to all obstacles being large walls
+	running_left_avg = 0
+	running_right_avg = 0
+	# Half of the point cloud width is 320
+	half_width = 320
+	# The midway height of the point cloud is 240
+	half_height = 240
+
+	for i in range(half_width):
+		running_left_avg += cv_image[half_height][i]
+		running_right_avg += cv_image[half_height][half_width+i]
+	_left_avg = running_left_avg / half_width
+	_right_avg = running_right_avg / half_width
+	print(_left_avg, _right_avg)
 
 def get_input():
 	"""
@@ -289,7 +289,7 @@ def main():
 	# /camera/depth/image/compressedDepth
 	# /camera/depth/image_rect/compressedDepth
 	#Change type to compressed image
-	obstacle_sub = rospy.Subscriber('/camera/depth/image_raw/compressedDepth', CompressedImage, escape_calc, queue_size=1)
+	obstacle_sub = rospy.Subscriber('/camera/depth/image_raw', Image, escape_calc, queue_size=1)
 	collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
 	# Function to call on ctrl + c
@@ -304,6 +304,7 @@ def main():
 	#move_cmd.angular.z = 0
 
 	tasks = [ go_forward, escape, get_input ]
+	#tasks = [escape, get_input ]
 
 	for t in tasks:
 		th = threading.Thread(target=t)
