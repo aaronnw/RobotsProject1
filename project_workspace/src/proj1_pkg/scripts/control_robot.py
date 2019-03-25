@@ -119,22 +119,26 @@ def escape():
 	turn_speed = 30
 	while True:
 		if _key_input_lock or _turning_lock:
+			print("LOCKED BY KEYS")
 			return
-		elif _left_avg < 800 and _right_avg < 800:
+		elif _left_avg < 850 and _right_avg < 850:
+			print(_left_avg, _right_avg)
 			print("\nEscaping symmetrical obstacles")
 			_escape_lock = True
-			turn(turn_speed, 45)	 # turn around ~180 degrees
+			turn(turn_speed, 35)	 # turn around ~180 degrees
 			time.sleep(1)	 # give it a little time to finish the turn
 			_escape_lock = False
 		# if the left side is too close, turn right
-		elif _left_avg < 700:
+		elif _left_avg < 750:
+			print(_left_avg, _right_avg)
 			print("\nAvoiding asymmetrical obstacle, turning right")
 			_escape_lock = True
-			turn(turn_speed, turn_time)	 # turn right a small amount while the obstacle is close
+			turn(-turn_speed, turn_time)	 # turn right a small amount while the obstacle is close
 			time.sleep(1)	 # give it a little time to finish the turn
 			_escape_lock = False
 		# if the right side is too close, turn left
-		elif _right_avg < 700:
+		elif _right_avg < 750:
+			print(_left_avg, _right_avg)
 			print("\nAvoiding asymmetrical obstacle, turning left")
 			_escape_lock = True
 			turn(turn_speed, turn_time)	 # turn left a small amount while the obstacle is close
@@ -165,7 +169,6 @@ def escape_calc(image):
 		running_right_avg += cv_image[half_height][half_width+i]
 	_left_avg = running_left_avg / half_width
 	_right_avg = running_right_avg / half_width
-	print(_left_avg, _right_avg)
 
 def get_input():
 	"""
