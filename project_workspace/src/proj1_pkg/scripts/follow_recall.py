@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import rospy
+import message_filters
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image, CompressedImage 
 import sensor_msgs.point_cloud2 as pc2
@@ -24,12 +25,14 @@ _threads = []
 _shutdown_flag = False
 _collision_lock = False
 _bridge = CvBridge()
+_colbridge = CvBridge()
 _hz = 5
 _left_avg = 123456
 _right_avg = 123456
 _follow_turn_direction = 'fwd'
 _follow_movement = 'stop'
 _follow_flag = True
+
 
 def turn(angle, duration):
 	"""
@@ -38,7 +41,6 @@ def turn(angle, duration):
 	global _hz
 	global _cmd_vel
 	global _key_input_lock
-	#_cmd_vel.publish(Twist())
 	r = rospy.Rate(_hz)
 	print('begin turn')
 	turn_cmd = Twist()
@@ -47,7 +49,7 @@ def turn(angle, duration):
 	# do this duration times
 	for i in range(duration):
 		if _key_input_lock:
-		   break
+			break
 		#print('actively turning')
 		_cmd_vel.publish(turn_cmd)
 		r.sleep()
@@ -111,6 +113,7 @@ def go_forward():
 			turn(turn_speed*direction, rng)
 			_turning_lock = False
 
+
 def escape():
 	global _key_input_lock
 	global _turning_lock
@@ -148,6 +151,7 @@ def escape():
 			time.sleep(1)	 # give it a little time to finish the turn
 			_escape_lock = False
 
+
 def follow():
 	global _follow_turn_direction
 	global _follow_movement
@@ -156,28 +160,42 @@ def follow():
 	global _cmd_vel
 
 	while not _shutdown_flag and not _collision_lock and _follow_flag:
-		print((_follow_turn_direction, _follow_movement))
+		print(_follow_turn_direction, _follow_movement)
 
-		move_cmd = Twist()
-		if _follow_movement == 'go':
-			move_cmd.linear.x = 0.15
-		if _follow_turn_direction == 'left':
-			move_cmd.angular.z = 35
-		elif _follow_turn_direction == 'right':
-			move_cmd.angular.z = -35
-		_cmd_vel.publish(move_cmd)
-		r = rospy.Rate(10)
+		#move_cmd = Twist()
+		#if _follow_movement == 'go':
+		#	move_cmd.linear.x = 0.15
+		#if _follow_turn_direction == 'left':
+		#	move_cmd.angular.z = radians(35)
+		#elif _follow_turn_direction == 'right':
+		#	move_cmd.angular.z = radians(-35)
+		#_cmd_vel.publish(move_cmd)
+		r = rospy.Rate(20)
 		r.sleep()
 
-def depth_calc(image):
+
+def color_calc(image):
+	global _color_flag
+	cv_color = _bridge.imgmsg_to_cv2(image, "rgb8")
+	color = cv_color[240][320]
+
+	if color[0] > 200 and color[1] < 150 and color[2] < 150:
+		print('red')
+	elif color[0] < 150 and color[1] > 200 and color[2] < 150:
+		print('green')
+	elif color[0] < 150 and color[1] < 150 and color[2] > 200:
+		print('blue')
+
+
+def image_calc(depth):
 	"""
-	Callback function for image processing.
+	Callback function for image depth and color processing.
 	"""
 	global _follow_turn_direction
 	global _follow_movement
 
-	cv_image = _bridge.imgmsg_to_cv2(image, "32FC1")
-	# print(cv_image)
+	cv_depth = _bridge.imgmsg_to_cv2(depth, "32FC1")
+
 	# calculate the average depth at the midline of image
 	# two averages, one for left half, one for right half
 	# looking only at the midline works here due to all obstacles being large walls
@@ -196,15 +214,14 @@ def depth_calc(image):
 	'''
 	closest = (0, 0)
 	closest_depth = 100000000000
-	for i in range(480):
-		for j in range(640):
-			if cv_image[i][j] > 0 and cv_image[i][j] < closest_depth:
-				closest_depth = cv_image[i][j]
-				closest = (i, j)
+	for j in range(640):
+		if cv_depth[240][j] > 0 and cv_depth[240][j] < closest_depth:
+			closest_depth = cv_depth[240][j]
+			closest = (240, j)
 
-	if closest[1] < 240:
+	if closest[1] < 220:
 		_follow_turn_direction = 'left'
-	elif closest[1] > 400:
+	elif closest[1] > 420:
 		_follow_turn_direction = 'right'
 	else:
 		_follow_turn_direction = 'fwd'
@@ -213,6 +230,7 @@ def depth_calc(image):
 		_follow_movement = 'go'
 	else:
 		_follow_movement = 'stop'
+
 
 def collision(data):
 	"""
@@ -263,13 +281,13 @@ def main():
 	# Create a publisher which can "talk" to TurtleBot and tell it to move
 	_cmd_vel = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=0)
 
-	#Options: 
-	# /camera/depth/image_raw
-	# /camera/depth/image_raw/compressedDepth
-	# /camera/depth/image/compressedDepth
-	# /camera/depth/image_rect/compressedDepth
-	#Change type to compressed image
-	depth_sub = rospy.Subscriber('/camera/depth/image_raw', Image, depth_calc, queue_size=1)
+	# Subscribers to relevant topics and their associated callback functions
+	depth_sub = message_filters.Subscriber('/camera/depth/image_raw', Image)
+	color_sub = message_filters.Subscriber('/camera/rgb/image_raw', Image)
+	depth_sub.registerCallback(image_calc)
+	color_sub.registerCallback(color_calc)
+	#ts = message_filters.ApproximateTimeSynchronizer([depth_sub, color_sub], 10, 1)
+	#ts.registerCallback(image_calc)
 	collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
 	# Function to call on ctrl + c
@@ -278,7 +296,7 @@ def main():
 	# xxxxx HZ comms
 	r = rospy.Rate(_hz);
 
-	tasks = [ follow ]
+	tasks = [follow]
 
 	for t in tasks:
 		th = threading.Thread(target=t)
@@ -290,6 +308,7 @@ def main():
 		pass
 
 	print('Shutting down turtlebot')
+
 
 if __name__ == '__main__':
 	main()
