@@ -32,7 +32,7 @@ _right_avg = 123456
 _follow_turn_direction = 'fwd'
 _follow_movement = 'stop'
 _follow_flag = True
-
+_color_flag = 'None'
 
 def turn(angle, duration):
 	"""
@@ -160,58 +160,46 @@ def follow():
 	global _cmd_vel
 
 	while not _shutdown_flag and not _collision_lock and _follow_flag:
-		print(_follow_turn_direction, _follow_movement)
-
-		#move_cmd = Twist()
-		#if _follow_movement == 'go':
-		#	move_cmd.linear.x = 0.15
-		#if _follow_turn_direction == 'left':
-		#	move_cmd.angular.z = radians(35)
-		#elif _follow_turn_direction == 'right':
-		#	move_cmd.angular.z = radians(-35)
-		#_cmd_vel.publish(move_cmd)
+		#print(_follow_turn_direction, _follow_movement)
+		'''
+		move_cmd = Twist()
+		turnspeed = 15
+		if _follow_movement == 'go':
+			move_cmd.linear.x = 0.1
+		elif _follow_movement == 'stop':
+			turnspeed = 10
+		if _follow_turn_direction == 'left':
+			move_cmd.angular.z = radians(turnspeed)
+		elif _follow_turn_direction == 'right':
+			move_cmd.angular.z = radians(-1 * turnspeed)
+		_cmd_vel.publish(move_cmd)
+		'''
 		r = rospy.Rate(20)
 		r.sleep()
 
 
-def color_calc(image):
-	global _color_flag
-	cv_color = _bridge.imgmsg_to_cv2(image, "rgb8")
-	color = cv_color[240][320]
-
-	if color[0] > 200 and color[1] < 150 and color[2] < 150:
-		print('red')
-	elif color[0] < 150 and color[1] > 200 and color[2] < 150:
-		print('green')
-	elif color[0] < 150 and color[1] < 150 and color[2] > 200:
-		print('blue')
-
-
-def image_calc(depth):
+def image_calc(depth, color):
 	"""
 	Callback function for image depth and color processing.
 	"""
 	global _follow_turn_direction
 	global _follow_movement
+	global _color_flag
 
 	cv_depth = _bridge.imgmsg_to_cv2(depth, "32FC1")
+	cv_color = _bridge.imgmsg_to_cv2(color, "rgb8")
 
-	# calculate the average depth at the midline of image
-	# two averages, one for left half, one for right half
-	# looking only at the midline works here due to all obstacles being large walls
-	'''running_left_avg = 0
-	running_right_avg = 0
-	# Half of the point cloud width is 320
-	half_width = 320
-	# The midway height of the point cloud is 240
-	half_height = 240
+	# color calculations
+	color = cv_color[240][320]
+	if color[0] > 200 and color[1] < 150 and color[2] < 150:
+		print('red')
+	elif color[0] < 100 and color[1] > 150 and color[2] < 100:
+		print('green')
+	elif color[0] < 150 and color[1] < 150 and color[2] > 200:
+		print('blue')
+	print(color)
 
-	for i in range(half_width):
-		running_left_avg += cv_image[half_height][i]
-		running_right_avg += cv_image[half_height][half_width+i]
-	_left_avg = running_left_avg / half_width
-	_right_avg = running_right_avg / half_width
-	'''
+	# depth calculations
 	closest = (0, 0)
 	closest_depth = 100000000000
 	for j in range(640):
@@ -219,17 +207,20 @@ def image_calc(depth):
 			closest_depth = cv_depth[240][j]
 			closest = (240, j)
 
-	if closest[1] < 220:
+	if closest_depth < 900 and cv_depth[240][320] - closest_depth < 50:
+		_follow_turn_direction = 'fwd'
+	elif closest[1] < 270 - max((closest_depth - 800), 0) / 20:
 		_follow_turn_direction = 'left'
-	elif closest[1] > 420:
+	elif closest[1] > 370 + max((closest_depth - 800), 0) / 20:
 		_follow_turn_direction = 'right'
 	else:
 		_follow_turn_direction = 'fwd'
 
-	if closest_depth > 800:
+	if closest_depth >= 800 and closest_depth < 1800:
 		_follow_movement = 'go'
 	else:
 		_follow_movement = 'stop'
+	#print(_follow_turn_direction, _follow_movement, closest[1], closest_depth)
 
 
 def collision(data):
@@ -284,10 +275,8 @@ def main():
 	# Subscribers to relevant topics and their associated callback functions
 	depth_sub = message_filters.Subscriber('/camera/depth/image_raw', Image)
 	color_sub = message_filters.Subscriber('/camera/rgb/image_raw', Image)
-	depth_sub.registerCallback(image_calc)
-	color_sub.registerCallback(color_calc)
-	#ts = message_filters.ApproximateTimeSynchronizer([depth_sub, color_sub], 10, 1)
-	#ts.registerCallback(image_calc)
+	ts = message_filters.ApproximateTimeSynchronizer([depth_sub, color_sub], 10, 1)
+	ts.registerCallback(image_calc)
 	collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
 	# Function to call on ctrl + c
