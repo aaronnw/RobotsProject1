@@ -35,6 +35,8 @@ _follow_movement = 'stop'
 _follow_flag = True
 _recall_flag = False
 _move_log = []
+_turn_speed = 15
+_forward_speed = 0.1
 
 sample_log = [('right', 'stop', 573, 433.0), ('right', 'stop', 584, 594.0), ('right', 'stop', 583, 578.0), ('right', 'stop', 590, 798.0), 
 ('right', 'go', 537, 885.0), ('right', 'go', 537, 882.0), ('left', 'stop', 137, 2116.0), ('left', 'stop', 190, 2116.0), 
@@ -74,19 +76,20 @@ def follow():
 	global _shutdown_flag
 	global _follow_flag
 	global _cmd_vel
+	global _turn_speed
+	global _forward_speed
 
 	while not _shutdown_flag and not _recall_flag:
 	 	if not _collision_lock and _follow_flag:
 			#print(_follow_turn_direction, _follow_movement)
 			move_cmd = Twist()
 			
-			turnspeed = 15
 			if _follow_movement == 'go':
-				move_cmd.linear.x = 0.1
+				move_cmd.linear.x = _forward_speed
 			if _follow_turn_direction == 'left':
-				move_cmd.angular.z = radians(turnspeed)
+				move_cmd.angular.z = radians(_turn_speed)
 			elif _follow_turn_direction == 'right':
-				move_cmd.angular.z = radians(-1 * turnspeed)
+				move_cmd.angular.z = radians(-1 * _turn_speed)
 			_cmd_vel.publish(move_cmd)
 			
 		r = rospy.Rate(20)
@@ -100,7 +103,7 @@ def recall():
 
 	while not _shutdown_flag:
 		if not _collision_lock and _recall_flag:
-			recall_script.return_to_start(_move_log)
+			recall_script.return_to_start(_turn_speed, _forward_speed, _move_log)
 			_recall_flag = False
 		r = rospy.Rate(1)
 		r.sleep()

@@ -133,8 +133,8 @@ def go_forward():
 			_turning_lock = False
 
 
-def return_to_start(log_of_movements):
+def return_to_start(turn_speed, forward_speed, log_of_movements):
 	# Construct a rough graph of locations from the movement log
 	# A* search the graph
-	print(log_of_movements)
+	print(turn_speed, forward_speed, log_of_movements)
 	test()
