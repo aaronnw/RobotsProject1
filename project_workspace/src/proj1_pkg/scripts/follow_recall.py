@@ -15,6 +15,7 @@ import curses
 import numpy as np
 import os
 import cv2
+import recall
 from cv_bridge import CvBridge, CvBridgeError
 
 _cmd_vel = rospy.Publisher('/cmd_vel_mux/input/navi', Twist, queue_size=1)
@@ -261,6 +262,7 @@ def shutdown():
 
 
 def main():
+	recall.test()
 	global _threads
 	global _cmd_vel
 	# initialize
