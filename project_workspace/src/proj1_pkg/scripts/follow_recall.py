@@ -32,7 +32,16 @@ _right_avg = 123456
 _follow_turn_direction = 'fwd'
 _follow_movement = 'stop'
 _follow_flag = True
-_color_flag = 'None'
+_recall_flag = False
+_move_log = []
+
+sample_log = [('right', 'stop', 573, 433.0), ('right', 'stop', 584, 594.0), ('right', 'stop', 583, 578.0), ('right', 'stop', 590, 798.0), 
+('right', 'go', 537, 885.0), ('right', 'go', 537, 882.0), ('left', 'stop', 137, 2116.0), ('left', 'stop', 190, 2116.0), 
+('left', 'stop', 108, 2129.0), ('left', 'stop', 190, 2116.0), ('left', 'stop', 190, 2116.0), ('left', 'stop', 190, 2116.0), 
+('left', 'stop', 189, 2116.0), ('right', 'stop', 583, 577.0), ('fwd', 'go', 309, 935.0), ('right', 'go', 385, 987.0), 
+('right', 'go', 388, 989.0), ('fwd', 'stop', 258, 754.0), ('left', 'stop', 184, 613.0), ('left', 'stop', 248, 589.0), 
+('fwd', 'stop', 429, 4774.0), ('left', 'go', 239, 1219.0)]
+
 
 def turn(angle, duration):
 	"""
@@ -159,22 +168,29 @@ def follow():
 	global _follow_flag
 	global _cmd_vel
 
-	while not _shutdown_flag and not _collision_lock and _follow_flag:
-		#print(_follow_turn_direction, _follow_movement)
-		'''
-		move_cmd = Twist()
-		turnspeed = 15
-		if _follow_movement == 'go':
-			move_cmd.linear.x = 0.1
-		elif _follow_movement == 'stop':
-			turnspeed = 10
-		if _follow_turn_direction == 'left':
-			move_cmd.angular.z = radians(turnspeed)
-		elif _follow_turn_direction == 'right':
-			move_cmd.angular.z = radians(-1 * turnspeed)
-		_cmd_vel.publish(move_cmd)
-		'''
+	while not _shutdown_flag:
+	 	if not _collision_lock and _follow_flag:
+			#print(_follow_turn_direction, _follow_movement)
+			move_cmd = Twist()
+			
+			turnspeed = 15
+			if _follow_movement == 'go':
+				move_cmd.linear.x = 0.1
+			if _follow_turn_direction == 'left':
+				move_cmd.angular.z = radians(turnspeed)
+			elif _follow_turn_direction == 'right':
+				move_cmd.angular.z = radians(-1 * turnspeed)
+			_cmd_vel.publish(move_cmd)
+			
 		r = rospy.Rate(20)
+		r.sleep()
+
+
+def recall():
+	while not _shutdown_flag:
+		if not _collision_lock and _recall_flag:
+			print('recall goes here')
+		r = rospy.Rate(1)
 		r.sleep()
 
 
@@ -184,7 +200,9 @@ def image_calc(depth, color):
 	"""
 	global _follow_turn_direction
 	global _follow_movement
-	global _color_flag
+	global _move_log
+	global _follow_flag
+	global _recall_flag
 
 	cv_depth = _bridge.imgmsg_to_cv2(depth, "32FC1")
 	cv_color = _bridge.imgmsg_to_cv2(color, "rgb8")
@@ -193,11 +211,15 @@ def image_calc(depth, color):
 	color = cv_color[240][320]
 	if color[0] > 200 and color[1] < 150 and color[2] < 150:
 		print('red')
+		_recall_flag = False
+		_follow_flag = True
 	elif color[0] < 100 and color[1] > 150 and color[2] < 100:
 		print('green')
+		_follow_flag = False
+		_recall_flag = True
 	elif color[0] < 150 and color[1] < 150 and color[2] > 200:
+		_move_log = []
 		print('blue')
-	print(color)
 
 	# depth calculations
 	closest = (0, 0)
@@ -220,7 +242,10 @@ def image_calc(depth, color):
 		_follow_movement = 'go'
 	else:
 		_follow_movement = 'stop'
-	#print(_follow_turn_direction, _follow_movement, closest[1], closest_depth)
+
+	if _follow_flag and not _collision_lock:
+		_move_log.append((_follow_turn_direction, _follxow_movement, closest[1], closest_depth))
+		print(_move_log)
 
 
 def collision(data):
@@ -257,7 +282,7 @@ def shutdown():
 		t.join()
 	# save the map
 	#os.system("rosrun map_server map_saver -f proj1_map_generated")
-	print("Saving map files to current directory")
+	#print("Saving map files to current directory")
 
 
 def main():
@@ -285,7 +310,7 @@ def main():
 	# xxxxx HZ comms
 	r = rospy.Rate(_hz);
 
-	tasks = [follow]
+	tasks = [follow, recall]
 
 	for t in tasks:
 		th = threading.Thread(target=t)
