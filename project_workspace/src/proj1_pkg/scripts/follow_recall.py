@@ -34,8 +34,8 @@ _follow_movement = 'stop'
 _follow_flag = False
 _recall_flag = False
 _move_log = []
-_turn_speed = 15
-_forward_speed = 0.1
+_turn_speed = 25
+_forward_speed = 0.15
 
 sample_log = [('right', 'stop', 573, 433.0), ('right', 'stop', 584, 594.0), ('right', 'stop', 583, 578.0), ('right', 'stop', 590, 798.0), 
 ('right', 'go', 537, 885.0), ('right', 'go', 537, 882.0), ('left', 'stop', 137, 2116.0), ('left', 'stop', 190, 2116.0), 
@@ -191,11 +191,12 @@ def follow():
 	global _turn_speed
 	global _forward_speed
 
-	while not _shutdown_flag and not _recall_flag:
+	while not _shutdown_flag:
+		# ensure the follow flag is active
 	 	if _follow_flag and not _collision_lock:
 			#print(_follow_turn_direction, _follow_movement)
 			move_cmd = Twist()
-		
+			# change the movement command based on the variables changed in the callback function
 			if _follow_movement == 'go':
 				move_cmd.linear.x = _forward_speed
 			if _follow_turn_direction == 'left':
@@ -203,37 +204,72 @@ def follow():
 			elif _follow_turn_direction == 'right':
 				move_cmd.angular.z = radians(-1 * _turn_speed)
 			_cmd_vel.publish(move_cmd)
-			_move_log.append(move_cmd)
-			
-		r = rospy.Rate(5)
+			# log the move if it is a non-zero move
+			if move_cmd.linear.x != 0 or move_cmd.angular.z != 0:
+				_move_log.append(move_cmd)
+
+		r = rospy.Rate(_hz)
 		r.sleep()
 
 
+def backtracking():
+	"""
+		Perform the logged moves in reverse to return to the saved position
+	"""
+	global _shutdown_flag
+	global _collision_lock
+	global _move_log
+	global _cmd_vel
+
+	# loop through the movement log
+	while len(_move_log) > 0 and not _shutdown_flag and not _collision_lock:
+		# get the last move and invert it
+		move_cmd = _move_log[-1]
+		move_cmd.linear.x *= -1
+		move_cmd.angular.z *= -1
+		_cmd_vel.publish(move_cmd)
+		# after use, delete it so we have a new last move
+		del _move_log[-1]
+		# sleep at the same rate(!!!) as we follow so the moves are for the appropriate amount of time
+		r = rospy.Rate(_hz)
+		r.sleep()
+	print('backtrack done')
+
+
 def recall():
+	"""
+		Determines when to recall the robot to the saved position
+	"""
 	global _shutdown_flag
 	global _collision_lock
 	global _recall_flag
 
+	# constantly checking for when recall needs to occur
 	while not _shutdown_flag:
 		if not _collision_lock and _recall_flag:
-			return_to_start(_turn_speed, _forward_speed, _move_log)
-			# _recall_flag = False
-			shutdown()
+			# call the appropriate recall function
+			#return_to_start(_turn_speed, _forward_speed, _move_log)
+			backtracking()
+			_recall_flag = False	# reset the flag
+
 		r = rospy.Rate(1)
 		r.sleep()
 
 
 def image_calc(depth, color):
 	"""
-	Callback function for image depth and color processing.
+		Callback function for image depth and color processing.
 	"""
 	global _follow_turn_direction
 	global _follow_movement
 	global _move_log
 	global _follow_flag
 	global _recall_flag
+	global _collision_lock
 
+	# no need to do these calculations if we're in a recall routine
 	if not _recall_flag:
+		# convert the images appropriately
 		cv_depth = _bridge.imgmsg_to_cv2(depth, "32FC1")
 		cv_color = _bridge.imgmsg_to_cv2(color, "rgb8")
 
@@ -242,32 +278,37 @@ def image_calc(depth, color):
 		red_val = center_color[0]
 		green_val = center_color[1]
 		blue_val = center_color[2]
-
+		# which color is the most prevalent?
 		primary = max([red_val, green_val, blue_val])
-
-		print(center_color)
+		# determine signaling for colors based on relative importance to the most prevalent color
 		if primary == red_val and red_val-green_val > 80 and red_val - blue_val > 80:
-			print('red')
+			print('red')	 # begin following
 			_recall_flag = False
 			_follow_flag = True
+			_collision_lock = False	 # note that this is the only way to override collision
+		# some colors are more sensitive than others
 		elif primary == green_val and green_val-red_val > 25 and green_val - blue_val > 25:
-			print('green')
+			print('green')	 # begin recall
 			_follow_flag = False
 			_recall_flag = True
 		elif primary == blue_val and blue_val-red_val > 50 and blue_val - green_val > 50:
-			_move_log = []
+			_move_log = []	 # save the position
 			print('blue')
 
 		# depth calculations
 		closest = (0, 0)
 		closest_depth = 100000000000
 		for j in range(640):
+			# check the midline for the closest point
 			if cv_depth[240][j] > 0 and cv_depth[240][j] < closest_depth:
 				closest_depth = cv_depth[240][j]
 				closest = (240, j)
-
+		# this is the "wall check" - when the center point is very close to the closest point, go forward
+		# when facing a wall, this stops the robot from oscillating back and forth forever
 		if closest_depth < 900 and cv_depth[240][320] - closest_depth < 50:
 			_follow_turn_direction = 'fwd'
+		# determining whether to turn is a function of depth as well
+		# the further away an object is, the wider the range to go forward is
 		elif closest[1] < 270 - max((closest_depth - 800), 0) / 20:
 			_follow_turn_direction = 'left'
 		elif closest[1] > 370 + max((closest_depth - 800), 0) / 20:
@@ -275,24 +316,29 @@ def image_calc(depth, color):
 		else:
 			_follow_turn_direction = 'fwd'
 
-		if closest_depth >= 800 and closest_depth < 1800:
-			print("following object")
+		# if we're not too close to the nearest object, go forward
+		# additionally confirm the object is not too far away
+		if closest_depth >= 700 and closest_depth < 1800:
+			if _follow_flag:
+				print("following object")
 			_follow_movement = 'go'
 		else:
-			print("Stopping")
+			if _follow_flag:
+				print("Stopping")
 			_follow_movement = 'stop'
 
 
 def collision(data):
 	"""
 	Halt if collision detected by bumper(s).
-	Wait for user to use keys to move away from the obstacle
 	"""
 	global _collision_lock
 	global _cmd_vel
 	print("Bumper Hit, stopping")
 	if data.state == BumperEvent.PRESSED:
 		_collision_lock = True
+		_follow_flag = False
+		_recall_flag = False
 		_cmd_vel.publish(Twist())
 
 
@@ -336,14 +382,11 @@ def main():
 	depth_sub = message_filters.Subscriber('/camera/depth/image_raw', Image)
 	color_sub = message_filters.Subscriber('/camera/rgb/image_raw', Image)
 	ts = message_filters.ApproximateTimeSynchronizer([depth_sub, color_sub], 10, 1)
-	ts.registerCallback(image_calc)
+	ts.registerCallback(image_calc)		# combine the depth and image callbacks
 	collision_sub = rospy.Subscriber('/mobile_base/events/bumper', BumperEvent, collision)
 
 	# Function to call on ctrl + c
 	rospy.on_shutdown(shutdown)
-
-	# xxxxx HZ comms
-	r = rospy.Rate(_hz);
 
 	tasks = [follow, recall]
 
