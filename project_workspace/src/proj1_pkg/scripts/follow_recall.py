@@ -10,6 +10,7 @@ import threading
 import time
 import random
 import Queue
+import math
 from math import radians
 import curses
 import numpy as np
@@ -33,6 +34,7 @@ _follow_turn_direction = 'fwd'
 _follow_movement = 'stop'
 _follow_flag = False
 _recall_flag = False
+_recall_direct_flag = False
 _move_log = []
 _turn_speed = 25
 _forward_speed = 0.15
@@ -45,142 +47,38 @@ sample_log = [('right', 'stop', 573, 433.0), ('right', 'stop', 584, 594.0), ('ri
 ('fwd', 'stop', 429, 4774.0), ('left', 'go', 239, 1219.0)]
 
 
-def turn(angle, duration):
+def turn(amount_rad):
+	#Rad per 10th second
 	"""
 	Turn the robot at the given radian speed and for <duration> tenths of a second
 	"""
 	global _key_input_lock
 	global _hz
 	global _cmd_vel
-	r = rospy.Rate(_hz)
-	print('begin turn')
+	# The speed needed to turn 360 degrees in 10 seconds
+	if amount_rad >= 0:
+		turn_speed = math.pi/5
+	else:
+		turn_speed = -math.pi/5
+	turn_time = abs(amount_rad/(turn_speed))
+	if turn_time == 0:
+		return
+	print('begin turn of ', amount_rad)
+	print('turn speed ', turn_speed)
+	print('turn time ', turn_time)
 	turn_cmd = Twist()
 	turn_cmd.linear.x = 0
-	turn_cmd.angular.z = radians(angle)
-	# do this duration times
-	for i in range(duration):
-		if _key_input_lock:
-			break
-		#print('actively turning')
+	turn_cmd.angular.z = turn_speed
+
+	t0 = rospy.Time.now().to_sec()
+	t1 = t0
+	current_angle = 0
+	while(t1-t0 < turn_time*1.35):
 		_cmd_vel.publish(turn_cmd)
-		r.sleep()
-	#print('done turning')
+		t1 = rospy.Time.now().to_sec()
+	print('done turn')
 	_cmd_vel.publish(Twist())
-	r.sleep()
 
-
-def escape():
-	global _key_input_lock
-	global _turning_lock
-	global _escape_lock
-	global _left_avg
-	global _right_avg
-
-	turn_time = 7
-	# Speed in rad/s for all turns
-	turn_speed = 35
-	while not _shutdown_flag:
-		if _key_input_lock or _turning_lock:
-			continue
-		elif _left_avg < 885 and _right_avg < 885:
-			print(_left_avg, _right_avg)
-			print("\nEscaping symmetrical obstacles")
-			_escape_lock = True
-			turn(turn_speed, 33)	 # turn around ~180 degrees
-			time.sleep(1)	 # give it a little time to finish the turn
-			_escape_lock = False
-		# if the left side is too close, turn right
-		elif _left_avg < 750:
-			print(_left_avg, _right_avg)
-			print("\nAvoiding asymmetrical obstacle, turning right")
-			_escape_lock = True
-			turn(-turn_speed, turn_time)	 # turn right a small amount while the obstacle is close
-			time.sleep(1)	 # give it a little time to finish the turn
-			_escape_lock = False
-		# if the right side is too close, turn left
-		elif _right_avg < 750:
-			print(_left_avg, _right_avg)
-			print("\nAvoiding asymmetrical obstacle, turning left")
-			_escape_lock = True
-			turn(turn_speed, turn_time)	 # turn left a small amount while the obstacle is close
-			time.sleep(1)	 # give it a little time to finish the turn
-			_escape_lock = False
-
-def go_forward():
-	"""
-	Drive the robot forward, making a random turn after every foot of movement
-	"""
-	global _turning_lock
-	global _shutdown_flag
-	global _key_input_lock
-	global _escape_lock
-	global _collision_lock
-	global _hz
-	global _cmd_vel
-	distance = 0  # distance traveled since last random turn, or since last lock release
-	max_straight_distance = 23  # maximum distance to travel before making a random turn
-	key_input_lock_delay = 3  # number of seconds to pause after detecting a key press
-
-	# keep the thread running until the program receives the shutdown signal
-	while not _shutdown_flag:
-		# if a key has been pressed, don't immediately attempt to drive again
-		# instead, give the user time to react to the key press and then press another key
-		if _key_input_lock and not _collision_lock:
-			time.sleep(key_input_lock_delay)
-			_key_input_lock = False
-			distance = 0
-
-		# if we are currently escaping, reset the turning distance
-		elif _escape_lock:
-			distance = 0
-
-		# if none of the higher-level tasks are active, drive forward
-		elif not _turning_lock and not _escape_lock and not _key_input_lock:
-			# publish the velocity
-			move_cmd = Twist()
-			move_cmd.linear.x = 0.15
-			move_cmd.angular.z = 0
-			#print('moving???')
-			_cmd_vel.publish(move_cmd)
-			# wait for 0.5 seconds (2 HZ) and publish again
-			r = rospy.Rate(10)
-			r.sleep()
-
-			# track the distance traveled
-			distance += 1
-			# if we've gone about a foot, then initiate the random turn protocol
-			_turning_lock = distance >= max_straight_distance
-
-		# turn randomly (uniformly sampled within +/- 15 degrees) after every 1ft of forward movement.
-		elif _turning_lock:
-			print("\nTurning randomly after 1ft of forward movement")
-			distance = 0  # reset the distance counter
-			_turning_lock = True
-			direction = random.choice([-1, 1]) 
-			rng = random.randint(1, 8)
-			turn_speed = 35
-			turn(turn_speed*direction, rng)
-			_turning_lock = False
-
-def flip_movements(log_of_movements):
-	turn_180 = turn(35, 33)
-	# log_of_movements.reverse()
-	# return_movements = [turn_180]
-	# for movement in log_of_movements:
-	# 	if movement.angular.z != 0:
-	# 		movement.angular.z = - 1* movement.angular.z
-	# 	return_movements.append(movement)
-
-	# return return_movements
-	return log_of_movements.reverse()
-
-
-def return_to_start(turn_speed, forward_speed, log_of_movements):
-	# Construct a rough graph of locations from the movement log
-	# A* search the graph
-	print("FOLLOW LOG: ", log_of_movements)
-	return_commands = flip_movements(log_of_movements)
-	print("RECALL INSTRUCTIONS: ", return_commands)
 
 def follow():
 	global _follow_turn_direction
@@ -190,10 +88,11 @@ def follow():
 	global _cmd_vel
 	global _turn_speed
 	global _forward_speed
+	global _recall_flag
 
 	while not _shutdown_flag:
 		# ensure the follow flag is active
-	 	if _follow_flag and not _collision_lock:
+	 	if _follow_flag and not _collision_lock and not _recall_flag:
 			#print(_follow_turn_direction, _follow_movement)
 			move_cmd = Twist()
 			# change the movement command based on the variables changed in the callback function
@@ -212,15 +111,14 @@ def follow():
 		r.sleep()
 
 
-def backtracking():
-	"""
-		Perform the logged moves in reverse to return to the saved position
-	"""
+def backtrack_all():
 	global _shutdown_flag
 	global _collision_lock
 	global _move_log
 	global _cmd_vel
+	global _hz
 
+	r = rospy.Rate(_hz)
 	# loop through the movement log
 	while len(_move_log) > 0 and not _shutdown_flag and not _collision_lock:
 		# get the last move and invert it
@@ -231,9 +129,77 @@ def backtracking():
 		# after use, delete it so we have a new last move
 		del _move_log[-1]
 		# sleep at the same rate(!!!) as we follow so the moves are for the appropriate amount of time
-		r = rospy.Rate(_hz)
 		r.sleep()
-	print('backtrack done')
+	_move_log = []
+	print('Backtrack all finished')
+
+
+def backtrack_direct():
+	"""
+		Perform the logged moves in reverse to return to the saved position
+	"""
+	global _shutdown_flag
+	global _collision_lock
+	global _move_log
+	global _cmd_vel
+	global _hz
+
+	x = 0
+	y = 0
+	last_x = 0
+	last_y = 0
+	current_angle = 0 
+	for movement in _move_log:
+		r = movement.linear.x * 1/_hz
+		angle = movement.angular.z * 1/_hz
+		current_angle += angle
+		x = last_x + r*math.cos(current_angle)
+		y = last_y + r*math.sin(current_angle)
+		print("current x: ", x)
+		print("current y: ", y)
+		last_x = x
+		last_y = y
+	_move_log = []
+	# Turn 180
+	# turn(math.pi)
+	# Travel the vector_back
+	distance = math.sqrt(x**2 + y **2)
+	if y != 0:
+		angle_to_origin = math.atan2(x, y)
+	else:
+		angle_to_origin = 0
+	#turn_angle = 0
+	#if y > 0: 
+	#	turn_angle = -(math.pi - angle_to_origin) - current_angle
+	#else:
+	#	turn_angle = angle_to_origin - current_angle
+	turn_angle = -current_angle
+	if y > 0:
+		turn_angle -= (math.pi/2 + angle_to_origin)
+	else:
+		turn_angle -= (math.pi/2 + angle_to_origin)
+
+	print("x:", x)
+	print("y:", y)
+	print("to origin:", angle_to_origin)
+	print("current", current_angle)
+	if turn_angle > math.pi:
+		turn_angle = math.pi*2 - turn_angle
+	turn(turn_angle)
+
+	# r = rospy.Rate(1/distance)
+	return_cmd = Twist()
+	return_cmd.linear.x = _forward_speed
+	return_cmd.angular.z = 0
+
+	t0 = rospy.Time.now().to_sec()
+	t1 = t0
+	current_angle = 0
+	while(t1-t0 < distance/_forward_speed):
+		_cmd_vel.publish(return_cmd)
+		t1 = rospy.Time.now().to_sec()
+	_cmd_vel.publish(Twist())
+	print('Backtrack direct finished')
 
 
 def recall():
@@ -243,13 +209,19 @@ def recall():
 	global _shutdown_flag
 	global _collision_lock
 	global _recall_flag
+	global _recall_direct_flag
 
 	# constantly checking for when recall needs to occur
 	while not _shutdown_flag:
 		if not _collision_lock and _recall_flag:
 			# call the appropriate recall function
 			#return_to_start(_turn_speed, _forward_speed, _move_log)
-			backtracking()
+			if _recall_direct_flag:
+				print("Direct back")
+				backtrack_direct()
+			else:
+				print("ALL back")
+				backtrack_all()
 			_recall_flag = False	# reset the flag
 
 		r = rospy.Rate(1)
@@ -275,25 +247,37 @@ def image_calc(depth, color):
 
 		# color calculations
 		center_color = cv_color[240][320]
-		red_val = center_color[0]
-		green_val = center_color[1]
-		blue_val = center_color[2]
+		red_val = int(center_color[0])
+		green_val = int(center_color[1])
+		blue_val = int(center_color[2])
+		# print(center_color)
 		# which color is the most prevalent?
 		primary = max([red_val, green_val, blue_val])
 		# determine signaling for colors based on relative importance to the most prevalent color
+		# If red, follow
 		if primary == red_val and red_val-green_val > 80 and red_val - blue_val > 80:
 			print('red')	 # begin following
 			_recall_flag = False
 			_follow_flag = True
 			_collision_lock = False	 # note that this is the only way to override collision
 		# some colors are more sensitive than others
-		elif primary == green_val and green_val-red_val > 25 and green_val - blue_val > 25:
+		# If green, fire reverse action recall
+		elif primary == green_val and green_val-red_val > 40 and green_val - blue_val > 40:
 			print('green')	 # begin recall
 			_follow_flag = False
+			_recall_direct_flag = False
 			_recall_flag = True
-		elif primary == blue_val and blue_val-red_val > 50 and blue_val - green_val > 50:
+		# If blue, save a location
+		elif primary == blue_val and blue_val-red_val > 40 and blue_val - green_val > 40:
 			_move_log = []	 # save the position
 			print('blue')
+		# If yellow, fire direct recall
+		elif primary == red_val and green_val-blue_val > 50 and red_val - green_val < 25:
+			_move_log = []
+			_recall_direct_flag = True	
+			_recall_flag = True
+			print('yellow')
+
 
 		# depth calculations
 		closest = (0, 0)
@@ -319,12 +303,8 @@ def image_calc(depth, color):
 		# if we're not too close to the nearest object, go forward
 		# additionally confirm the object is not too far away
 		if closest_depth >= 700 and closest_depth < 1800:
-			if _follow_flag:
-				print("following object")
 			_follow_movement = 'go'
 		else:
-			if _follow_flag:
-				print("Stopping")
 			_follow_movement = 'stop'
 
 
