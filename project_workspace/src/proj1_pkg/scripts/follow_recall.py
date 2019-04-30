@@ -73,7 +73,7 @@ def turn(amount_rad):
 	t0 = rospy.Time.now().to_sec()
 	t1 = t0
 	current_angle = 0
-	while(t1-t0 < turn_time*1.35):
+	while(t1-t0 < turn_time*1.42):  # 1.35
 		_cmd_vel.publish(turn_cmd)
 		t1 = rospy.Time.now().to_sec()
 	print('done turn')
@@ -223,6 +223,7 @@ def recall():
 				print("ALL back")
 				backtrack_all()
 			_recall_flag = False	# reset the flag
+			_move_log = []
 
 		r = rospy.Rate(1)
 		r.sleep()
@@ -237,8 +238,9 @@ def image_calc(depth, color):
 	global _move_log
 	global _follow_flag
 	global _recall_flag
+	global _recall_direct_flag
 	global _collision_lock
-
+	# print('image received')
 	# no need to do these calculations if we're in a recall routine
 	if not _recall_flag:
 		# convert the images appropriately
@@ -267,17 +269,16 @@ def image_calc(depth, color):
 			_follow_flag = False
 			_recall_direct_flag = False
 			_recall_flag = True
-		# If blue, save a location
-		elif primary == blue_val and blue_val-red_val > 40 and blue_val - green_val > 40:
-			_move_log = []	 # save the position
-			print('blue')
 		# If yellow, fire direct recall
 		elif primary == red_val and green_val-blue_val > 50 and red_val - green_val < 25:
-			_move_log = []
+			_follow_flag = False
 			_recall_direct_flag = True	
 			_recall_flag = True
 			print('yellow')
-
+		# If blue, save a location
+		elif primary == blue_val and blue_val-red_val > 40 and blue_val - green_val > 40:
+			# _move_log = []	 # save the position
+			print('blue')
 
 		# depth calculations
 		closest = (0, 0)
